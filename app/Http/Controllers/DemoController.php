@@ -25,7 +25,7 @@ class DemoController extends Controller
 
         $blobs = $this->createBlobs($files);
 
-        $treeSha = $this->createTrees($blobs, $baseTreeSha);
+        $treeSha = $this->createTrees($blobs, $baseTreeSha, "backup");
 
         $commitSha = $this->createCommit($treeSha, $baseTreeSha);
 
@@ -35,7 +35,15 @@ class DemoController extends Controller
     function getBaseTreeSha($branchName, $directory = "")
     {
         $result = $this->submitGithub("/git/trees/" . $branchName, "GET", null);
-        return $result["response"]->sha;
+        if (empty($directory)) {
+            return $result["response"]->sha;
+        }
+
+        $firstDir = collect($result["response"]->tree)->first(function ($t) use ($directory) {
+            return strcmp($t->type, "tree") === 0 && strcmp($t->path, $directory) === 0;
+        });
+
+        return $firstDir->sha;
     }
 
     function createBlobs($files)
@@ -45,9 +53,9 @@ class DemoController extends Controller
             return null;
         }
 
-        return array_map(function ($file) {
+        return collect($files)->map(function ($file) {
             return $this->createBlob($file);
-        }, $files);
+        });
     }
 
     function createBlob($file)
@@ -82,16 +90,17 @@ class DemoController extends Controller
         return null;
     }
 
-    function createTrees($blobs, $baseTreeSha)
+    function createTrees($blobs, $baseTreeSha, $directory = "")
     {
-        $trees = array_map(function ($blob) {
+        $trees = $blobs->map(function ($blob) use ($directory) {
+            $prefix = empty($directory) ? "" : $directory . "/";
             return [
-                "path" => $blob["filename"],
+                "path" => $prefix . $blob["filename"],
                 "mode" => "100644", // default
                 "type" => "blob", //default,
                 "sha" => $blob["sha"]
             ];
-        }, $blobs);
+        })->toArray();
 
         $body = [
             "base_tree" => $baseTreeSha,
@@ -154,6 +163,8 @@ class DemoController extends Controller
                 "User-Agent: Backend Server"
             ),
         ));
+
+        Log::info("Request: " . json_encode($body));
 
         $response = curl_exec($curl);
         $status = curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
